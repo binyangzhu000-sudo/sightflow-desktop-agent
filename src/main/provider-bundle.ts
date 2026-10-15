@@ -1,16 +1,12 @@
 import { app } from 'electron'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ProviderAdapter, ProviderEvent, ProviderInput } from '../core/session-types'
 
 export const BUILTIN_DOUBAO_PROVIDER_ID = 'volcengine-ark'
-export const BUILTIN_ATLASCLOUD_PROVIDER_ID = 'atlascloud'
-const BUILTIN_PROVIDER_IDS = new Set([
-  BUILTIN_DOUBAO_PROVIDER_ID,
-  BUILTIN_ATLASCLOUD_PROVIDER_ID
-])
+const BUILTIN_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
 
 /**
  * 内置 doubao（火山方舟）provider 的资源目录。
@@ -23,23 +19,29 @@ function getBuiltinProviderDir(id: string): string {
   return path.join(root, 'resources', 'providers', id)
 }
 
+interface ProviderSchemaFieldBase {
+  title: string
+  /** 设置页字段下方的提示文字 */
+  description?: string
+  placeholder?: string
+}
+
 export type ProviderSchemaField =
-  | {
+  | (ProviderSchemaFieldBase & {
       type: 'string' | 'password'
-      title: string
       default?: string
-    }
-  | {
+      /** string 字段在设置页使用多行输入框 */
+      multiline?: boolean
+    })
+  | (ProviderSchemaFieldBase & {
       type: 'select'
-      title: string
       default?: string
       enum: string[]
-    }
-  | {
+    })
+  | (ProviderSchemaFieldBase & {
       type: 'boolean'
-      title: string
       default?: boolean
-    }
+    })
 
 export interface ProviderConfigSchema {
   type: 'object'
@@ -52,6 +54,8 @@ export interface ProviderBundleManifest {
   id: string
   name: string
   version: string
+  /** 设置页智能体列表中显示的简介 */
+  description?: string
   entry: string
   moduleType?: 'module' | 'commonjs'
   capabilities: ['chat']
@@ -167,7 +171,7 @@ export async function installProviderFromUrl(manifestUrl: string): Promise<Provi
 
 async function installBuiltinProviderFromUrl(manifestUrl: string): Promise<ProviderInstallResult> {
   const providerId = normalizeBuiltinProviderId(manifestUrl.slice('builtin://'.length))
-  if (!BUILTIN_PROVIDER_IDS.has(providerId)) {
+  if (!BUILTIN_PROVIDER_ID_PATTERN.test(providerId)) {
     throw new Error(`未知内置聊天服务: ${providerId}`)
   }
 
@@ -208,6 +212,83 @@ export async function getBuiltinProviderManifestRaw(id: string): Promise<Provide
   } catch {
     return null
   }
+}
+
+export interface BuiltinProviderCatalogField {
+  key: string
+  label: string
+  type: 'text' | 'password' | 'select' | 'textarea'
+  required?: boolean
+  placeholder?: string
+  hint?: string
+  defaultValue?: string
+  options?: Array<{ label: string; value: string }>
+}
+
+export interface BuiltinProviderCatalogItem {
+  id: string
+  name: string
+  description?: string
+  version: string
+  manifestUrl: string
+  capabilities: string[]
+  configSchema: { fields: BuiltinProviderCatalogField[] }
+}
+
+/**
+ * 扫描 resources/providers/*，把每个内置 manifest.json 转成设置页目录项。
+ * 菜单信息（名称、简介、字段、可选模型）全部来自 manifest，渲染层不再硬编码。
+ * doubao（volcengine-ark）有专属的共享视觉密钥逻辑，继续由渲染层内置，不在此列。
+ */
+export async function listBuiltinProviderCatalog(): Promise<BuiltinProviderCatalogItem[]> {
+  const root = path.dirname(getBuiltinProviderDir('_'))
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+
+  const items: BuiltinProviderCatalogItem[] = []
+  for (const id of entries.sort()) {
+    if (id === BUILTIN_DOUBAO_PROVIDER_ID || !BUILTIN_PROVIDER_ID_PATTERN.test(id)) continue
+    const manifest = await getBuiltinProviderManifestRaw(id)
+    if (!manifest || manifest.id !== id) continue
+    const required = new Set(manifest.configSchema.required || [])
+    const fields: BuiltinProviderCatalogField[] = []
+    for (const [key, field] of Object.entries(manifest.configSchema.properties)) {
+      if (field.type === 'boolean') continue
+      const base = {
+        key,
+        label: field.title,
+        required: required.has(key),
+        placeholder: field.placeholder,
+        hint: field.description,
+        defaultValue: typeof field.default === 'string' ? field.default : undefined
+      }
+      if (field.type === 'select') {
+        fields.push({
+          ...base,
+          type: 'select',
+          options: field.enum.map((value) => ({ label: value, value }))
+        })
+      } else if (field.type === 'password') {
+        fields.push({ ...base, type: 'password' })
+      } else {
+        fields.push({ ...base, type: field.multiline ? 'textarea' : 'text' })
+      }
+    }
+    items.push({
+      id: manifest.id,
+      name: manifest.name,
+      description: manifest.description,
+      version: manifest.version,
+      manifestUrl: `builtin://${manifest.id}`,
+      capabilities: manifest.capabilities,
+      configSchema: { fields }
+    })
+  }
+  return items
 }
 
 /** 读取内置 doubao 的原始 manifest（保留 apiKey 字段，供调试 / 校验） */
@@ -459,6 +540,7 @@ function validateManifest(input: any): ProviderBundleManifest {
     id: input.id,
     name: input.name,
     version: input.version,
+    description: typeof input.description === 'string' ? input.description : undefined,
     entry: input.entry,
     moduleType: input.moduleType,
     capabilities: ['chat'],

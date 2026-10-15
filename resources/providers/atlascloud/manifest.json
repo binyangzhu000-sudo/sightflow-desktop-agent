@@ -3,6 +3,7 @@
   "id": "atlascloud",
   "name": "Atlas Cloud",
   "version": "1.0.0",
+  "description": "内置 OpenAI-compatible 聊天 Provider，支持截图分析和自动回复。",
   "entry": "provider.bundle.js",
   "moduleType": "module",
   "capabilities": ["chat"],
@@ -12,11 +13,13 @@
       "apiKey": {
         "type": "password",
         "title": "接口密钥",
-        "description": "Atlas Cloud API Key，建议通过 ATLASCLOUD_API_KEY 管理。"
+        "description": "Atlas Cloud API Key，建议通过 ATLASCLOUD_API_KEY 管理。",
+        "placeholder": "输入 Atlas Cloud API Key"
       },
       "model": {
         "type": "select",
         "title": "模型名称",
+        "description": "这些模型在 Atlas Cloud 模型目录中支持 text + image 输入。",
         "default": "qwen/qwen3.5-flash",
         "enum": [
           "qwen/qwen3.5-flash",
@@ -28,6 +31,8 @@
       "systemPrompt": {
         "type": "string",
         "title": "系统提示词",
+        "placeholder": "你是一个桌面聊天自动回复助手。根据截图中的聊天内容，生成合适的回复...",
+        "multiline": true,
         "default": ""
       }
     },

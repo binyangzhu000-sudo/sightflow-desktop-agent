@@ -21,6 +21,7 @@ import {
   getBuiltinDoubaoManifestForUi,
   getInstalledProviderManifest,
   installProviderFromUrl,
+  listBuiltinProviderCatalog,
   InstalledProviderInfo,
   loadBuiltinDoubaoProvider,
   loadInstalledProvider
@@ -506,6 +507,8 @@ app.whenReady().then(async () => {
       return { success: false, error: error?.message || String(error) }
     }
   })
+
+  ipcMain.handle('provider:getBuiltinCatalog', async () => listBuiltinProviderCatalog())
 
   ipcMain.handle('provider:getInstalled', async () => {
     const settings = normalizeSettings(settingsStore.store)
